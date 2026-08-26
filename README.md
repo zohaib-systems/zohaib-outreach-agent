@@ -96,4 +96,4 @@ Access the live dashboard at:
 http://YOUR_EC2_PUBLIC_IP:3000
 
 📄 License
-MIT License. Developed for Backend AI Engineering Capstone.
+MIT License. Developed for AI fluency and Backend AI Engineering Capstone.
