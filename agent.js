@@ -1,3 +1,72 @@
+
+const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
+
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server);
+
+// Store recent log lines in memory
+const logHistory = [];
+
+// Intercept standard console output to stream to frontend
+const originalLog = console.log;
+const originalError = console.error;
+
+function captureLog(type, args) {
+  const message = `[${new Date().toLocaleTimeString()}] [${type.toUpperCase()}] ` + 
+    args.map(a => (typeof a === 'object' ? JSON.stringify(a) : a)).join(' ');
+  
+  logHistory.push(message);
+  if (logHistory.length > 100) logHistory.shift(); // Keep last 100 lines
+  
+  io.emit('new-log', message);
+}
+
+console.log = (...args) => { originalLog.apply(console, args); captureLog('info', args); };
+console.error = (...args) => { originalError.apply(console, args); captureLog('error', args); };
+
+// Web UI Route
+app.get('/', (req, res) => {
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <title>Outreach Agent Live Logs</title>
+      <script src="/socket.io/socket.io.js"></script>
+      <style>
+        body { background: #0d1117; color: #58a6ff; font-family: monospace; padding: 20px; }
+        h2 { color: #f0f6fc; margin-bottom: 10px; }
+        #logs { background: #161b22; border: 1px solid #30363d; padding: 15px; border-radius: 6px; height: 70vh; overflow-y: auto; white-space: pre-wrap; }
+        .log-entry { margin-bottom: 4px; border-bottom: 1px solid #21262d; padding-bottom: 2px; }
+      </style>
+    </head>
+    <body>
+      <h2>🤖 Zohaib Outreach Agent — Live Terminal Stream</h2>
+      <div id="logs"></div>
+      <script>
+        const socket = io();
+        const logsDiv = document.getElementById('logs');
+        
+        socket.on('connect', () => { logsDiv.innerHTML += '<div class="log-entry" style="color:#7ee787;">[CONNECTED TO AGENT STREAM]</div>'; });
+        socket.on('new-log', (msg) => {
+          const entry = document.createElement('div');
+          entry.className = 'log-entry';
+          entry.textContent = msg;
+          logsDiv.appendChild(entry);
+          logsDiv.scrollTop = logsDiv.scrollHeight;
+        });
+      </script>
+    </body>
+    </html>
+  `);
+});
+
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => console.log(`Log Web UI running on port ${PORT}`));
+
+
 require('dotenv').config();
 const { google } = require('googleapis');
 const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
