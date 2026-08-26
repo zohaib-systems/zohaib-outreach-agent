@@ -33,7 +33,7 @@ app.get('/', (req, res) => {
     </head>
     <body>
       <h2>🤖 Zohaib Outreach Agent</h2>
-      <p.subtitle>Autonomous Human-in-the-Loop Pipeline — Real-Time Operations Stream</p.subtitle>
+      <p class="subtitle">Autonomous Human-in-the-Loop Pipeline — Real-Time Operations Stream</p>
 
       <!-- System Architecture Diagram -->
       <div class="flow-container">
