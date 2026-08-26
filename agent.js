@@ -1,62 +1,112 @@
-
-const express = require('express');
-const http = require('http');
-const { Server } = require('socket.io');
-
-const app = express();
-const server = http.createServer(app);
-const io = new Server(server);
-
-// Store recent log lines in memory
-const logHistory = [];
-
-// Intercept standard console output to stream to frontend
-const originalLog = console.log;
-const originalError = console.error;
-
-function captureLog(type, args) {
-  const message = `[${new Date().toLocaleTimeString()}] [${type.toUpperCase()}] ` + 
-    args.map(a => (typeof a === 'object' ? JSON.stringify(a) : a)).join(' ');
-  
-  logHistory.push(message);
-  if (logHistory.length > 100) logHistory.shift(); // Keep last 100 lines
-  
-  io.emit('new-log', message);
-}
-
-console.log = (...args) => { originalLog.apply(console, args); captureLog('info', args); };
-console.error = (...args) => { originalError.apply(console, args); captureLog('error', args); };
-
-// Web UI Route
 app.get('/', (req, res) => {
   res.send(`
     <!DOCTYPE html>
     <html>
     <head>
-      <title>Outreach Agent Live Logs</title>
+      <title>Autonomous Outreach Agent — Live Operations Dashboard</title>
       <script src="/socket.io/socket.io.js"></script>
       <style>
-        body { background: #0d1117; color: #58a6ff; font-family: monospace; padding: 20px; }
-        h2 { color: #f0f6fc; margin-bottom: 10px; }
-        #logs { background: #161b22; border: 1px solid #30363d; padding: 15px; border-radius: 6px; height: 70vh; overflow-y: auto; white-space: pre-wrap; }
-        .log-entry { margin-bottom: 4px; border-bottom: 1px solid #21262d; padding-bottom: 2px; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { background: #0d1117; color: #c9d1d9; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 24px; }
+        h2 { color: #f0f6fc; font-size: 1.5rem; margin-bottom: 6px; }
+        p.subtitle { color: #8b949e; margin-bottom: 24px; font-size: 0.9rem; }
+        
+        /* Architecture Flow Diagram */
+        .flow-container { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 20px; margin-bottom: 24px; }
+        .flow-title { color: #58a6ff; font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 16px; }
+        .flow-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; align-items: center; position: relative; }
+        .node { background: #21262d; border: 1px solid #30363d; border-radius: 6px; padding: 14px; text-align: center; position: relative; transition: all 0.3s ease; }
+        .node.active { border-color: #3fb950; box-shadow: 0 0 12px rgba(63, 185, 80, 0.3); background: #1c2d24; }
+        .node-icon { font-size: 1.4rem; margin-bottom: 6px; }
+        .node-label { font-size: 0.85rem; font-weight: 600; color: #f0f6fc; }
+        .node-sub { font-size: 0.72rem; color: #8b949e; margin-top: 4px; }
+        .arrow { text-align: center; color: #484f58; font-size: 1.2rem; }
+
+        /* Terminal Stream */
+        .terminal-container { background: #161b22; border: 1px solid #30363d; border-radius: 8px; overflow: hidden; }
+        .terminal-header { background: #21262d; padding: 10px 16px; border-bottom: 1px solid #30363d; font-family: monospace; font-size: 0.8rem; color: #8b949e; display: flex; justify-content: space-between; }
+        #logs { padding: 16px; height: 50vh; overflow-y: auto; font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 0.85rem; line-height: 1.5; white-space: pre-wrap; }
+        .log-entry { margin-bottom: 4px; border-bottom: 1px solid #1f242c; padding-bottom: 2px; color: #58a6ff; }
+        .log-error { color: #f85149; }
+        .log-success { color: #3fb950; }
       </style>
     </head>
     <body>
-      <h2>🤖 Zohaib Outreach Agent — Live Terminal Stream</h2>
-      <div id="logs"></div>
+      <h2>🤖 Zohaib Outreach Agent</h2>
+      <p.subtitle>Autonomous Human-in-the-Loop Pipeline — Real-Time Operations Stream</p.subtitle>
+
+      <!-- System Architecture Diagram -->
+      <div class="flow-container">
+        <div class="flow-title">Agent System Workflow</div>
+        <div class="flow-grid">
+          <div class="node" id="node-sheets">
+            <div class="node-icon">📊</div>
+            <div class="node-label">Google Sheets</div>
+            <div class="node-sub">Lead Polling Cron</div>
+          </div>
+          <div class="node" id="node-llm">
+            <div class="node-icon">🧠</div>
+            <div class="node-label">OpenRouter LLM</div>
+            <div class="node-sub">Draft Personalization</div>
+          </div>
+          <div class="node" id="node-discord">
+            <div class="node-icon">💬</div>
+            <div class="node-label">Discord Approval</div>
+            <div class="node-sub">Human-in-the-Loop</div>
+          </div>
+          <div class="node" id="node-gmail">
+            <div class="node-icon">✉️</div>
+            <div class="node-label">Gmail API</div>
+            <div class="node-sub">Email Dispatcher</div>
+          </div>
+          <div class="node" id="node-tracker">
+            <div class="node-icon">🔄</div>
+            <div class="node-label">Thread Monitor</div>
+            <div class="node-sub">48h Auto Follow-up</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Real Terminal Logs -->
+      <div class="terminal-container">
+        <div class="terminal-header">
+          <span>LIVE CONSOLE STREAM</span>
+          <span id="status" style="color:#7ee787;">● CONNECTED</span>
+        </div>
+        <div id="logs"></div>
+      </div>
+
       <script>
         const socket = io();
         const logsDiv = document.getElementById('logs');
-        
-        socket.on('connect', () => { logsDiv.innerHTML += '<div class="log-entry" style="color:#7ee787;">[CONNECTED TO AGENT STREAM]</div>'; });
+
+        socket.on('connect', () => {
+          document.getElementById('status').textContent = '● LIVE';
+        });
+
         socket.on('new-log', (msg) => {
           const entry = document.createElement('div');
           entry.className = 'log-entry';
+
+          if (msg.includes('ERROR') || msg.includes('TokenInvalid')) entry.className += ' log-error';
+          if (msg.includes('logged into Discord') || msg.includes('Sent')) entry.className += ' log-success';
+
           entry.textContent = msg;
           logsDiv.appendChild(entry);
           logsDiv.scrollTop = logsDiv.scrollHeight;
+
+          // Dynamically highlight diagram nodes based on active log output
+          if (msg.includes('Checking for new rows')) highlightNode('node-sheets');
+          if (msg.includes('Generating pitch')) highlightNode('node-llm');
+          if (msg.includes('Discord') || msg.includes('approval')) highlightNode('node-discord');
+          if (msg.includes('Gmail') || msg.includes('dispatch')) highlightNode('node-gmail');
         });
+
+        function highlightNode(id) {
+          document.querySelectorAll('.node').forEach(n => n.classList.remove('active'));
+          const el = document.getElementById(id);
+          if (el) el.classList.add('active');
+        }
       </script>
     </body>
     </html>
