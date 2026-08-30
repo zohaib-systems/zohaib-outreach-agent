@@ -3,7 +3,16 @@ const http = require('http');
 const { Server } = require('socket.io');
 require('dotenv').config();
 const { google } = require('googleapis');
-const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { 
+  Client, 
+  GatewayIntentBits, 
+  ActionRowBuilder, 
+  ButtonBuilder, 
+  ButtonStyle, 
+  ModalBuilder, 
+  TextInputBuilder, 
+  TextInputStyle 
+} = require('discord.js');
 const cron = require('node-cron');
 const axios = require('axios');
 
@@ -12,10 +21,7 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-// Store recent log lines in memory
 const logHistory = [];
-
-// Intercept standard console output to stream to frontend
 const originalLog = console.log;
 const originalError = console.error;
 
@@ -25,79 +31,35 @@ function captureLog(type, args) {
   
   logHistory.push(message);
   if (logHistory.length > 100) logHistory.shift();
-  
   io.emit('new-log', message);
 }
 
 console.log = (...args) => { originalLog.apply(console, args); captureLog('info', args); };
 console.error = (...args) => { originalError.apply(console, args); captureLog('error', args); };
 
-// Web UI Route
 app.get('/', (req, res) => {
   res.send(`
     <!DOCTYPE html>
     <html>
     <head>
-      <title>Autonomous Outreach Agent — Live Operations Dashboard</title>
+      <title>Autonomous Outreach Agent — Operations Dashboard</title>
       <script src="/socket.io/socket.io.js"></script>
       <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { background: #0d1117; color: #c9d1d9; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 24px; }
-        h2 { color: #f0f6fc; font-size: 1.5rem; margin-bottom: 6px; }
-        p.subtitle { color: #8b949e; margin-bottom: 24px; font-size: 0.9rem; }
-        
-        .flow-container { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 20px; margin-bottom: 24px; }
-        .flow-title { color: #58a6ff; font-weight: 600; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 16px; }
-        .flow-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; align-items: center; position: relative; }
-        .node { background: #21262d; border: 1px solid #30363d; border-radius: 6px; padding: 14px; text-align: center; position: relative; transition: all 0.3s ease; }
-        .node.active { border-color: #3fb950; box-shadow: 0 0 12px rgba(63, 185, 80, 0.3); background: #1c2d24; }
-        .node-icon { font-size: 1.4rem; margin-bottom: 6px; }
-        .node-label { font-size: 0.85rem; font-weight: 600; color: #f0f6fc; }
-        .node-sub { font-size: 0.72rem; color: #8b949e; margin-top: 4px; }
-
+        body { background: #0d1117; color: #c9d1d9; font-family: system-ui, sans-serif; padding: 24px; }
+        h2 { color: #f0f6fc; margin-bottom: 6px; }
+        .subtitle { color: #8b949e; margin-bottom: 24px; font-size: 0.9rem; }
         .terminal-container { background: #161b22; border: 1px solid #30363d; border-radius: 8px; overflow: hidden; }
-        .terminal-header { background: #21262d; padding: 10px 16px; border-bottom: 1px solid #30363d; font-family: monospace; font-size: 0.8rem; color: #8b949e; display: flex; justify-content: space-between; }
-        #logs { padding: 16px; height: 50vh; overflow-y: auto; font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 0.85rem; line-height: 1.5; white-space: pre-wrap; }
-        .log-entry { margin-bottom: 4px; border-bottom: 1px solid #1f242c; padding-bottom: 2px; color: #58a6ff; }
+        .terminal-header { background: #21262d; padding: 10px 16px; font-family: monospace; font-size: 0.8rem; color: #8b949e; display: flex; justify-content: space-between; }
+        #logs { padding: 16px; height: 60vh; overflow-y: auto; font-family: monospace; font-size: 0.85rem; line-height: 1.5; white-space: pre-wrap; }
+        .log-entry { margin-bottom: 4px; border-bottom: 1px solid #1f242c; color: #58a6ff; }
         .log-error { color: #f85149; }
         .log-success { color: #3fb950; }
       </style>
     </head>
     <body>
       <h2>🤖 Zohaib Outreach Agent</h2>
-      <p class="subtitle">Autonomous Human-in-the-Loop Pipeline — Healthcare Phase 1 Operations Stream</p>
-
-      <div class="flow-container">
-        <div class="flow-title">Agent System Workflow</div>
-        <div class="flow-grid">
-          <div class="node" id="node-sheets">
-            <div class="node-icon">📊</div>
-            <div class="node-label">Google Sheets</div>
-            <div class="node-sub">Lead Polling Cron</div>
-          </div>
-          <div class="node" id="node-llm">
-            <div class="node-icon">🧠</div>
-            <div class="node-label">OpenRouter LLM</div>
-            <div class="node-sub">Diagnosis Drafting</div>
-          </div>
-          <div class="node" id="node-discord">
-            <div class="node-icon">💬</div>
-            <div class="node-label">Discord Approval</div>
-            <div class="node-sub">Human-in-the-Loop</div>
-          </div>
-          <div class="node" id="node-gmail">
-            <div class="node-icon">✉️</div>
-            <div class="node-label">Gmail API</div>
-            <div class="node-sub">Email Dispatcher</div>
-          </div>
-          <div class="node" id="node-tracker">
-            <div class="node-icon">🔄</div>
-            <div class="node-label">Thread Monitor</div>
-            <div class="node-sub">48h Auto Follow-up</div>
-          </div>
-        </div>
-      </div>
-
+      <p class="subtitle">Autonomous Human-in-the-Loop Pipeline — Interactive Discord Feedback Loop</p>
       <div class="terminal-container">
         <div class="terminal-header">
           <span>LIVE CONSOLE STREAM</span>
@@ -105,37 +67,18 @@ app.get('/', (req, res) => {
         </div>
         <div id="logs"></div>
       </div>
-
       <script>
         const socket = io();
         const logsDiv = document.getElementById('logs');
-
-        socket.on('connect', () => {
-          document.getElementById('status').textContent = '● LIVE';
-        });
-
         socket.on('new-log', (msg) => {
           const entry = document.createElement('div');
           entry.className = 'log-entry';
-
-          if (msg.includes('ERROR') || msg.includes('TokenInvalid')) entry.className += ' log-error';
-          if (msg.includes('logged into Discord') || msg.includes('Sent')) entry.className += ' log-success';
-
+          if (msg.includes('ERROR')) entry.className += ' log-error';
+          if (msg.includes('Sent') || msg.includes('logged')) entry.className += ' log-success';
           entry.textContent = msg;
           logsDiv.appendChild(entry);
           logsDiv.scrollTop = logsDiv.scrollHeight;
-
-          if (msg.includes('Checking for new rows')) highlightNode('node-sheets');
-          if (msg.includes('Generating diagnosis')) highlightNode('node-llm');
-          if (msg.includes('Discord') || msg.includes('approval')) highlightNode('node-discord');
-          if (msg.includes('Gmail') || msg.includes('dispatch')) highlightNode('node-gmail');
         });
-
-        function highlightNode(id) {
-          document.querySelectorAll('.node').forEach(n => n.classList.remove('active'));
-          const el = document.getElementById(id);
-          if (el) el.classList.add('active');
-        }
       </script>
     </body>
     </html>
@@ -163,7 +106,7 @@ oauth2Client.setCredentials({ refresh_token: process.env.GOOGLE_REFRESH_TOKEN })
 const sheets = google.sheets({ version: 'v4', auth: oauth2Client });
 const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
 
-// OpenRouter LLM Helper
+// --- OPENROUTER LLM HELPER ---
 async function generateLLMResponse(prompt) {
   const models = [...new Set([
     process.env.OPENROUTER_MODEL || 'meta-llama/llama-3.3-70b-instruct:free',
@@ -191,16 +134,13 @@ async function generateLLMResponse(prompt) {
       } catch (err) {
         lastError = err;
         if (err.response?.status !== 429) throw err;
-
         const retryAfter = Number(err.response.headers?.['retry-after']);
         const delayMs = Number.isFinite(retryAfter) ? retryAfter * 1000 : 2000 * (attempt + 1);
         console.warn(`[LLM] ${model} rate-limited; retrying in ${delayMs}ms...`);
         await new Promise(resolve => setTimeout(resolve, delayMs));
       }
     }
-    console.warn(`[LLM] Switching from ${model} after repeated rate limits.`);
   }
-
   console.error('[LLM Error]:', lastError.response ? lastError.response.data : lastError.message);
   throw lastError;
 }
@@ -209,7 +149,7 @@ async function generateLLMResponse(prompt) {
 async function getSheetRows() {
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: process.env.SPREADSHEET_ID,
-    range: 'Sheet1!A1:L100', // Expanded range for Phase 1 columns
+    range: 'Sheet1!A1:L100',
   });
 
   const rows = res.data.values || [];
@@ -232,7 +172,6 @@ async function getSheetRows() {
   }));
 }
 
-// Strict Cell Update Helper
 async function updateCell(rowIndex, colLetter, value) {
   await sheets.spreadsheets.values.update({
     spreadsheetId: process.env.SPREADSHEET_ID,
@@ -242,7 +181,6 @@ async function updateCell(rowIndex, colLetter, value) {
   });
 }
 
-// Gmail Sending Helper
 async function sendGmail({ to, subject, body, threadId = null }) {
   const utf8Subject = `=?utf-8?B?${Buffer.from(subject).toString('base64')}?=`;
   const messageParts = [
@@ -272,9 +210,27 @@ async function sendGmail({ to, subject, body, threadId = null }) {
   return res.data;
 }
 
-// --- CORE WORKFLOW PROCEDURES ---
+// Helper to build Discord Action Buttons
+function createApprovalActionRow(rowIndex) {
+  const approveBtn = new ButtonBuilder()
+    .setCustomId(`approve_${rowIndex}`)
+    .setLabel('Approve & Send')
+    .setStyle(ButtonStyle.Success);
 
-// 1. Process New Rows & Send Discord Approval Request (Phase 1 Prompt)
+  const editBtn = new ButtonBuilder()
+    .setCustomId(`edit_${rowIndex}`)
+    .setLabel('✏️ Edit / Revise')
+    .setStyle(ButtonStyle.Primary);
+
+  const rejectBtn = new ButtonBuilder()
+    .setCustomId(`reject_${rowIndex}`)
+    .setLabel('Reject')
+    .setStyle(ButtonStyle.Danger);
+
+  return new ActionRowBuilder().addComponents(approveBtn, editBtn, rejectBtn);
+}
+
+// --- CORE WORKFLOW PROCEDURES ---
 async function processNewLeads() {
   try {
     const rows = await getSheetRows();
@@ -282,7 +238,7 @@ async function processNewLeads() {
 
     for (const row of newLeads) {
       if (!row.Email) continue;
-      console.log(`[Agent] Generating diagnosis-backed pitch draft for: ${row.Name || row.Email}...`);
+      console.log(`[Agent] Generating diagnosis pitch draft for: ${row.Name || row.Email}...`);
 
       const prompt = `You are drafting a personalized outreach email for a healthcare professional.
 
@@ -311,26 +267,14 @@ Generate draft email only. Do not send. Do not include subject lines or conversa
 
       const draft = await generateLLMResponse(prompt);
 
-      // Write draft to Column J & Status to Column I
       await updateCell(row.rowIndex, 'J', draft);
       await updateCell(row.rowIndex, 'I', 'Pending Approval');
 
       const channel = await discordClient.channels.fetch(process.env.DISCORD_CHANNEL_ID);
-
-      const approveBtn = new ButtonBuilder()
-        .setCustomId(`approve_${row.rowIndex}`)
-        .setLabel('Approve & Send')
-        .setStyle(ButtonStyle.Success);
-
-      const rejectBtn = new ButtonBuilder()
-        .setCustomId(`reject_${row.rowIndex}`)
-        .setLabel('Reject')
-        .setStyle(ButtonStyle.Danger);
-
-      const actionRow = new ActionRowBuilder().addComponents(approveBtn, rejectBtn);
+      const actionRow = createApprovalActionRow(row.rowIndex);
 
       await channel.send({
-        content: `🎯 **New Healthcare Outreach Draft Ready**\n**Name:** ${row.Name || 'N/A'}\n**Email:** ${row.Email}\n**Key Observation:** ${row.keyObservation || 'N/A'}\n**Pitch Angle:** ${row.pitchAngle || 'N/A'}\n\n**Proposed Draft:**\n\`\`\`\n${draft}\n\`\`\``,
+        content: `🎯 **New Healthcare Outreach Draft Ready**\n**Name:** ${row.Name || 'N/A'}\n**Email:** ${row.Email}\n**Key Observation:** ${row.keyObservation || 'N/A'}\n\n**Proposed Draft:**\n\`\`\`\n${draft}\n\`\`\``,
         components: [actionRow]
       });
     }
@@ -339,7 +283,6 @@ Generate draft email only. Do not send. Do not include subject lines or conversa
   }
 }
 
-// 2. Check 24-Hour Replies & 48-Hour Follow-Up Triggers
 async function checkFollowUpsAndReplies() {
   try {
     const rows = await getSheetRows();
@@ -386,18 +329,7 @@ async function checkFollowUpsAndReplies() {
         await updateCell(row.rowIndex, 'I', 'Follow-up Pending Approval');
 
         const channel = await discordClient.channels.fetch(process.env.DISCORD_CHANNEL_ID);
-
-        const approveBtn = new ButtonBuilder()
-          .setCustomId(`approve_${row.rowIndex}`)
-          .setLabel('Approve Follow-up')
-          .setStyle(ButtonStyle.Success);
-
-        const rejectBtn = new ButtonBuilder()
-          .setCustomId(`reject_${row.rowIndex}`)
-          .setLabel('Skip Follow-up')
-          .setStyle(ButtonStyle.Danger);
-
-        const actionRow = new ActionRowBuilder().addComponents(approveBtn, rejectBtn);
+        const actionRow = createApprovalActionRow(row.rowIndex);
 
         await channel.send({
           content: `⏰ **48h Follow-up Draft Ready**\n**Client:** ${row.Name}\n**Email:** ${row.Email}\n\n**Follow-up Draft:**\n\`\`\`\n${followUpDraft}\n\`\`\``,
@@ -410,50 +342,112 @@ async function checkFollowUpsAndReplies() {
   }
 }
 
-// --- DISCORD BUTTON HANDLERS ---
+// --- DISCORD INTERACTION HANDLERS (BUTTONS & MODAL FEEDBACK) ---
 discordClient.on('interactionCreate', async (interaction) => {
-  if (!interaction.isButton()) return;
+  // 1. Handle Button Clicks
+  if (interaction.isButton()) {
+    const [action, rowIndexStr] = interaction.customId.split('_');
+    const rowIndex = parseInt(rowIndexStr);
+    const rows = await getSheetRows();
+    const row = rows.find(r => r.rowIndex === rowIndex);
 
-  const [action, rowIndexStr] = interaction.customId.split('_');
-  const rowIndex = parseInt(rowIndexStr);
-  const rows = await getSheetRows();
-  const row = rows.find(r => r.rowIndex === rowIndex);
+    if (action === 'approve') {
+      if (row && row.Email && row.DraftContent) {
+        await interaction.deferUpdate();
+        try {
+          const subject = `Healthcare Systems & Optimization - ${row.Name || 'Partnership'}`;
+          const emailRes = await sendGmail({
+            to: row.Email,
+            subject,
+            body: row.DraftContent,
+            threadId: row.ThreadID || null
+          });
 
-  if (action === 'approve') {
-    if (row && row.Email && row.DraftContent) {
+          const nowIso = new Date().toISOString();
+          await updateCell(rowIndex, 'I', 'sent');
+          await updateCell(rowIndex, 'K', nowIso);
+          await updateCell(rowIndex, 'L', emailRes.threadId);
+
+          await interaction.editReply({
+            content: `✅ **Email Sent Successfully!**\n**To:** ${row.Email}\n**Thread ID:** \`${emailRes.threadId}\``,
+            components: []
+          });
+        } catch (err) {
+          console.error('Failed to send email:', err);
+          await interaction.followUp({ content: `❌ Failed to send email to ${row.Email}: ${err.message}`, ephemeral: true });
+        }
+      }
+    } else if (action === 'edit') {
+      // Open modal to capture revision feedback from user
+      const modal = new ModalBuilder()
+        .setCustomId(`modal_edit_${rowIndex}`)
+        .setTitle(`Revise Draft for Row ${rowIndex}`);
+
+      const feedbackInput = new TextInputBuilder()
+        .setCustomId('feedback_input')
+        .setLabel('Instructions for LLM revision:')
+        .setStyle(TextInputStyle.Paragraph)
+        .setPlaceholder('e.g., Make it shorter, focus more on automated intake forms, make tone softer...')
+        .setRequired(true);
+
+      const actionRow = new ActionRowBuilder().addComponents(feedbackInput);
+      modal.addComponents(actionRow);
+
+      await interaction.showModal(modal);
+    } else if (action === 'reject') {
+      await updateCell(rowIndex, 'I', 'Rejected');
+      await interaction.update({
+        content: `❌ **Outreach Cancelled for Row ${rowIndex}**`,
+        components: []
+      });
+    }
+  }
+
+  // 2. Handle Modal Form Submissions (LLM Feedback Revision Loop)
+  if (interaction.isModalSubmit()) {
+    if (interaction.customId.startsWith('modal_edit_')) {
+      const rowIndex = parseInt(interaction.customId.split('_')[2]);
+      const feedback = interaction.fields.getTextInputValue('feedback_input');
+
       await interaction.deferUpdate();
 
-      try {
-        const subject = `Healthcare Systems & Optimization - ${row.Name || 'Partnership'}`;
-        const emailRes = await sendGmail({
-          to: row.Email,
-          subject,
-          body: row.DraftContent,
-          threadId: row.ThreadID || null
-        });
+      const rows = await getSheetRows();
+      const row = rows.find(r => r.rowIndex === rowIndex);
 
-        const nowIso = new Date().toISOString();
+      if (row) {
+        console.log(`[Agent] Regenerating draft for Row ${rowIndex} with user feedback: "${feedback}"...`);
 
-        // Update Col I (Status), Col K (Sent At), Col L (Thread ID)
-        await updateCell(rowIndex, 'I', 'sent');
-        await updateCell(rowIndex, 'K', nowIso);
-        await updateCell(rowIndex, 'L', emailRes.threadId);
+        const revisionPrompt = `You are revising an outreach email draft for a healthcare client based on direct human feedback.
+
+Previous Draft:
+"${row.DraftContent}"
+
+Client Details:
+- Name: ${row.Name}
+- Specialization: ${row.Specialization}
+- Key Observation: ${row.keyObservation}
+
+Human Revision Feedback:
+"${feedback}"
+
+Instructions:
+- Rewrite the email incorporate the feedback while keeping it professional and under 150 words.
+- Sign as "Zohaib Ali, AI Systems Company".
+- Provide ONLY the body text. Do not add subject lines or conversation preamble.`;
+
+        const revisedDraft = await generateLLMResponse(revisionPrompt);
+
+        // Update draft in Column J
+        await updateCell(rowIndex, 'J', revisedDraft);
+
+        const actionRow = createApprovalActionRow(rowIndex);
 
         await interaction.editReply({
-          content: `✅ **Email Sent Successfully!**\n**To:** ${row.Email}\n**Thread ID:** \`${emailRes.threadId}\``,
-          components: []
+          content: `🔄 **Revised Draft Ready (Row ${rowIndex})**\n**User Feedback Applied:** *"${feedback}"*\n**Name:** ${row.Name}\n**Email:** ${row.Email}\n\n**New Proposed Draft:**\n\`\`\`\n${revisedDraft}\n\`\`\``,
+          components: [actionRow]
         });
-      } catch (err) {
-        console.error('Failed to send email:', err);
-        await interaction.followUp({ content: `❌ Failed to send email to ${row.Email}: ${err.message}`, ephemeral: true });
       }
     }
-  } else if (action === 'reject') {
-    await updateCell(rowIndex, 'I', 'Rejected');
-    await interaction.update({
-      content: `❌ **Outreach Cancelled for Row ${rowIndex}**`,
-      components: []
-    });
   }
 });
 
@@ -461,13 +455,11 @@ discordClient.on('interactionCreate', async (interaction) => {
 discordClient.once('clientReady', () => {
   console.log(`🤖 Zohaib Outreach Agent logged into Discord as ${discordClient.user.tag}`);
 
-  // Poll for new leads every 2 minutes
   cron.schedule('*/2 * * * *', () => {
     console.log('[Cron] Checking for new rows...');
     processNewLeads();
   });
 
-  // Check for 24h replies and 48h follow-ups every hour
   cron.schedule('0 * * * *', () => {
     console.log('[Cron] Checking replies and 48h follow-ups...');
     checkFollowUpsAndReplies();
