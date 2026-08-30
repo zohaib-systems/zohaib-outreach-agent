@@ -1,7 +1,13 @@
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
+require('dotenv').config();
+const { google } = require('googleapis');
+const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const cron = require('node-cron');
+const axios = require('axios');
 
+// --- EXPRESS & SOCKET.IO SETUP ---
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
@@ -59,7 +65,7 @@ app.get('/', (req, res) => {
     </head>
     <body>
       <h2>🤖 Zohaib Outreach Agent</h2>
-      <p class="subtitle">Autonomous Human-in-the-Loop Pipeline — Real-Time Operations Stream</p>
+      <p class="subtitle">Autonomous Human-in-the-Loop Pipeline — Healthcare Phase 1 Operations Stream</p>
 
       <div class="flow-container">
         <div class="flow-title">Agent System Workflow</div>
@@ -72,7 +78,7 @@ app.get('/', (req, res) => {
           <div class="node" id="node-llm">
             <div class="node-icon">🧠</div>
             <div class="node-label">OpenRouter LLM</div>
-            <div class="node-sub">Draft Personalization</div>
+            <div class="node-sub">Diagnosis Drafting</div>
           </div>
           <div class="node" id="node-discord">
             <div class="node-icon">💬</div>
@@ -120,7 +126,7 @@ app.get('/', (req, res) => {
           logsDiv.scrollTop = logsDiv.scrollHeight;
 
           if (msg.includes('Checking for new rows')) highlightNode('node-sheets');
-          if (msg.includes('Generating pitch')) highlightNode('node-llm');
+          if (msg.includes('Generating diagnosis')) highlightNode('node-llm');
           if (msg.includes('Discord') || msg.includes('approval')) highlightNode('node-discord');
           if (msg.includes('Gmail') || msg.includes('dispatch')) highlightNode('node-gmail');
         });
@@ -139,14 +145,7 @@ app.get('/', (req, res) => {
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, '0.0.0.0', () => console.log(`Log Web UI running on port ${PORT}`));
 
-
-require('dotenv').config();
-const { google } = require('googleapis');
-const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
-const cron = require('node-cron');
-const axios = require('axios');
-
-// Initialize Discord Client
+// --- DISCORD & GOOGLE SETUP ---
 const discordClient = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -155,7 +154,6 @@ const discordClient = new Client({
   ]
 });
 
-// Initialize Google OAuth2 Client
 const oauth2Client = new google.auth.OAuth2(
   process.env.GOOGLE_CLIENT_ID,
   process.env.GOOGLE_CLIENT_SECRET
@@ -165,7 +163,7 @@ oauth2Client.setCredentials({ refresh_token: process.env.GOOGLE_REFRESH_TOKEN })
 const sheets = google.sheets({ version: 'v4', auth: oauth2Client });
 const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
 
-// OpenRouter LLM Request Helper
+// OpenRouter LLM Helper
 async function generateLLMResponse(prompt) {
   const models = [...new Set([
     process.env.OPENROUTER_MODEL || 'meta-llama/llama-3.3-70b-instruct:free',
@@ -207,11 +205,11 @@ async function generateLLMResponse(prompt) {
   throw lastError;
 }
 
-// Strict Sheet Row Parser (Columns A to J)
+// Strict Sheet Row Parser (Phase 1: Columns A to L)
 async function getSheetRows() {
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: process.env.SPREADSHEET_ID,
-    range: 'Sheet1!A1:J100',
+    range: 'Sheet1!A1:L100', // Expanded range for Phase 1 columns
   });
 
   const rows = res.data.values || [];
@@ -223,12 +221,14 @@ async function getSheetRows() {
     Website: row[1] || '',
     Email: row[2] || '',
     Specialization: row[3] || '',
-    Notes: row[4] || '',
-    Status: row[5] || 'New',
-    DraftContent: row[6] || '',
-    SentAt: row[7] || '',
-    LastCheckedAt: row[8] || '',
-    ThreadID: row[9] || ''
+    keyObservation: row[4] || '',    // Col E
+    problemIdentified: row[5] || '', // Col F
+    pitchAngle: row[6] || '',        // Col G
+    leadScore: row[7] || '',         // Col H
+    Status: row[8] || 'new',         // Col I
+    DraftContent: row[9] || '',      // Col J
+    SentAt: row[10] || '',           // Col K
+    ThreadID: row[11] || ''          // Col L
   }));
 }
 
@@ -274,28 +274,46 @@ async function sendGmail({ to, subject, body, threadId = null }) {
 
 // --- CORE WORKFLOW PROCEDURES ---
 
-// 1. Process New Rows & Send Discord Approval Request
+// 1. Process New Rows & Send Discord Approval Request (Phase 1 Prompt)
 async function processNewLeads() {
   try {
     const rows = await getSheetRows();
-    const newLeads = rows.filter(r => r.Status === 'New' || r.Status === 'Pending Draft' || !r.Status);
+    const newLeads = rows.filter(r => r.Status.toLowerCase() === 'new' || r.Status === 'Pending Draft' || !r.Status);
 
     for (const row of newLeads) {
       if (!row.Email) continue;
-      console.log(`[Agent] Generating pitch draft for: ${row.Name || row.Email}...`);
+      console.log(`[Agent] Generating diagnosis-backed pitch draft for: ${row.Name || row.Email}...`);
 
-      const prompt = `You are an expert AI & web solutions engineer crafting a personalized, concise cold pitch email to a potential client.
-Client Name: ${row.Name}
-Website: ${row.Website}
-Specialization: ${row.Specialization}
-Notes/Background Details: ${row.Notes}
+      const prompt = `You are drafting a personalized outreach email for a healthcare professional.
 
-Write a direct, professional, genuinely personalized cold outreach email (under 120 words). Avoid hype, exaggerated claims, spammy phrases, excessive punctuation, emojis, and unnecessary links. Make it clear why the message is relevant to this specific client. Provide ONLY the body text of the email. Do not add a subject line or conversational preamble. End the email with the signature "Zohaib Ali".`;
+Input:
+- Name: ${row.Name}
+- Email: ${row.Email}
+- Specialization: ${row.Specialization}
+- Key Observation: ${row.keyObservation}
+- Problem Identified: ${row.problemIdentified}
+- Pitch Angle: ${row.pitchAngle}
+
+Email structure:
+1. Personalized opener (reference key observation)
+2. Diagnosis (why this matters for their business)
+3. Solution (what you can help with)
+4. Low-friction CTA ("quick call", "no pressure")
+
+Rules:
+- Never be generic
+- Reference the specific observation
+- Do NOT pitch multiple services
+- Keep under 150 words
+- Sign: "Zohaib Ali, AI Systems Company"
+
+Generate draft email only. Do not send. Do not include subject lines or conversational preambles.`;
 
       const draft = await generateLLMResponse(prompt);
 
-      await updateCell(row.rowIndex, 'G', draft);
-      await updateCell(row.rowIndex, 'F', 'Pending Approval');
+      // Write draft to Column J & Status to Column I
+      await updateCell(row.rowIndex, 'J', draft);
+      await updateCell(row.rowIndex, 'I', 'Pending Approval');
 
       const channel = await discordClient.channels.fetch(process.env.DISCORD_CHANNEL_ID);
 
@@ -312,7 +330,7 @@ Write a direct, professional, genuinely personalized cold outreach email (under 
       const actionRow = new ActionRowBuilder().addComponents(approveBtn, rejectBtn);
 
       await channel.send({
-        content: `🎯 **New Client Outreach Draft Ready**\n**Name:** ${row.Name || 'N/A'}\n**Email:** ${row.Email}\n**Website:** ${row.Website || 'N/A'}\n\n**Proposed Pitch Draft:**\n\`\`\`\n${draft}\n\`\`\``,
+        content: `🎯 **New Healthcare Outreach Draft Ready**\n**Name:** ${row.Name || 'N/A'}\n**Email:** ${row.Email}\n**Key Observation:** ${row.keyObservation || 'N/A'}\n**Pitch Angle:** ${row.pitchAngle || 'N/A'}\n\n**Proposed Draft:**\n\`\`\`\n${draft}\n\`\`\``,
         components: [actionRow]
       });
     }
@@ -328,7 +346,7 @@ async function checkFollowUpsAndReplies() {
     const now = new Date();
 
     for (const row of rows) {
-      if (row.Status !== 'Sent' || !row.SentAt) continue;
+      if (row.Status.toLowerCase() !== 'sent' || !row.SentAt) continue;
 
       const sentDate = new Date(row.SentAt);
       const hoursElapsed = (now - sentDate) / (1000 * 60 * 60);
@@ -346,13 +364,11 @@ async function checkFollowUpsAndReplies() {
 
           if (clientReplied) {
             console.log(`[Agent] Client ${row.Email} replied! Halting automation.`);
-            await updateCell(row.rowIndex, 'F', 'Replied');
+            await updateCell(row.rowIndex, 'I', 'Replied');
             
             const channel = await discordClient.channels.fetch(process.env.DISCORD_CHANNEL_ID);
             await channel.send(`🎉 **Client Replied!**\n**Client:** ${row.Name}\n**Email:** ${row.Email} has responded to your email thread.`);
             continue;
-          } else {
-            await updateCell(row.rowIndex, 'I', now.toISOString());
           }
         } catch (e) {
           console.error(`[Agent] Error checking Thread ID ${row.ThreadID}:`, e.message);
@@ -362,12 +378,12 @@ async function checkFollowUpsAndReplies() {
       if (hoursElapsed >= 48) {
         console.log(`[Agent] Generating 48h follow-up draft for ${row.Email}...`);
 
-        const prompt = `Write a brief, polite 2-sentence follow-up email checking in on a previous pitch sent to ${row.Name}. Keep it natural, friendly, and low-pressure. Avoid hype, spammy phrases, excessive punctuation, emojis, and unnecessary links. Provide ONLY the email body text. End the email with the signature "Zohaib Ali".`;
+        const prompt = `Write a light, low-pressure 2-sentence follow-up email checking in on a previous pitch sent to ${row.Name}. Reference checking in on their booking system optimization. Keep under 60 words. Sign: "Zohaib Ali, AI Systems Company". Provide ONLY body text.`;
 
         const followUpDraft = await generateLLMResponse(prompt);
 
-        await updateCell(row.rowIndex, 'G', followUpDraft);
-        await updateCell(row.rowIndex, 'F', 'Follow-up Pending Approval');
+        await updateCell(row.rowIndex, 'J', followUpDraft);
+        await updateCell(row.rowIndex, 'I', 'Follow-up Pending Approval');
 
         const channel = await discordClient.channels.fetch(process.env.DISCORD_CHANNEL_ID);
 
@@ -408,7 +424,7 @@ discordClient.on('interactionCreate', async (interaction) => {
       await interaction.deferUpdate();
 
       try {
-        const subject = `Web Systems & Optimization - ${row.Name || 'Partnership'}`;
+        const subject = `Healthcare Systems & Optimization - ${row.Name || 'Partnership'}`;
         const emailRes = await sendGmail({
           to: row.Email,
           subject,
@@ -418,9 +434,10 @@ discordClient.on('interactionCreate', async (interaction) => {
 
         const nowIso = new Date().toISOString();
 
-        await updateCell(rowIndex, 'F', 'Sent');
-        await updateCell(rowIndex, 'H', nowIso);
-        await updateCell(rowIndex, 'J', emailRes.threadId);
+        // Update Col I (Status), Col K (Sent At), Col L (Thread ID)
+        await updateCell(rowIndex, 'I', 'sent');
+        await updateCell(rowIndex, 'K', nowIso);
+        await updateCell(rowIndex, 'L', emailRes.threadId);
 
         await interaction.editReply({
           content: `✅ **Email Sent Successfully!**\n**To:** ${row.Email}\n**Thread ID:** \`${emailRes.threadId}\``,
@@ -432,7 +449,7 @@ discordClient.on('interactionCreate', async (interaction) => {
       }
     }
   } else if (action === 'reject') {
-    await updateCell(rowIndex, 'F', 'Rejected');
+    await updateCell(rowIndex, 'I', 'Rejected');
     await interaction.update({
       content: `❌ **Outreach Cancelled for Row ${rowIndex}**`,
       components: []
